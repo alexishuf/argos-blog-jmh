@@ -24,7 +24,23 @@ class LockQueue implements Queue {
         } finally { lock.unlock(); }
     }
 
-    @Override public void offer(int value) throws ClosedException {
+    @Override public boolean offer(int value) throws ClosedException {
+        lock.lock();
+        try {
+            if (closed) {
+                throw ClosedException.INSTANCE;
+            } else if (size >= data.length) {
+                return false;
+            } else {
+                data[(readIdx+size)%data.length] = value;
+                ++size;
+                hasItems.signal();
+                return true;
+            }
+        } finally { lock.unlock(); }
+    }
+
+    @Override public void put(int value) throws ClosedException {
         lock.lock();
         try {
             while (size == data.length && !closed)
@@ -37,6 +53,23 @@ class LockQueue implements Queue {
         } finally {
             lock.unlock();
         }
+    }
+
+    @Override public int poll(int fallback) throws ClosedException {
+        lock.lock();
+        try {
+            if (size == 0 && !closed) {
+                return fallback;
+            } else if (closed) {
+                throw ClosedException.INSTANCE;
+            } else {
+                int readIdx = this.readIdx, item = data[readIdx];
+                this.readIdx = (readIdx+1)%data.length;
+                --size;
+                hasSpace.signal();
+                return item;
+            }
+        } finally { lock.unlock(); }
     }
 
     @Override public int take() throws ClosedException {

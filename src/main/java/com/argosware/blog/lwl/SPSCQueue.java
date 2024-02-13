@@ -44,7 +44,29 @@ class SPSCQueue implements Queue {
         }
     }
 
-    @Override public void offer(int value) throws ClosedException {
+    @Override public boolean offer(int value) throws ClosedException {
+        Thread unpark = null;
+        while ((int) LOCK.compareAndExchangeAcquire(this, 0, 1) != 0)
+            Thread.onSpinWait();
+        try {
+            if (closed) {
+                throw ClosedException.INSTANCE;
+            } else if (this.size >= data.length) {
+                return false;
+            } else {
+                data[(readIdx+size)%data.length] = value;
+                ++size;
+                unpark = consumer;
+                consumer = null;
+                return true;
+            }
+        } finally {
+            LOCK.setRelease(this, 0);
+            LockSupport.unpark(unpark);
+        }
+    }
+
+    @Override public void put(int value) throws ClosedException {
         while (true) {
             Thread unpark = null;
             while ((int) LOCK.compareAndExchangeAcquire(this, 0, 1) != 0)
@@ -72,6 +94,29 @@ class SPSCQueue implements Queue {
                     LOCK.setRelease(this, 0);
                 LockSupport.unpark(unpark);
             }
+        }
+    }
+
+    @Override public int poll(int fallback) throws ClosedException {
+        Thread unpark = null;
+        while ((int) LOCK.compareAndExchangeAcquire(this, 0, 1) != 0)
+            Thread.onSpinWait();
+        try {
+            if (closed) {
+                throw ClosedException.INSTANCE;
+            } else if (size == 0) {
+                return fallback;
+            } else {
+                int readIdx = this.readIdx, item = data[readIdx];
+                this.readIdx = (readIdx+1)%data.length;
+                --size;
+                unpark = producer;
+                producer = null;
+                return item;
+            }
+        } finally {
+            LOCK.setRelease(this, 0);
+            LockSupport.unpark(unpark);
         }
     }
 

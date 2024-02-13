@@ -163,7 +163,7 @@ public class LockingWithoutLock {
     @State(Scope.Thread)
     public static class ConsumerState extends PairState {
         @Override public void counterpart(int i) throws Queue.ClosedException {
-            queue.offer(i);
+            queue.put(i);
         }
     }
 
@@ -176,8 +176,8 @@ public class LockingWithoutLock {
     }
 
     @Fork(value = 1)
-    @Measurement(iterations = 5, time = 100, timeUnit = TimeUnit.MILLISECONDS)
-    @Warmup(iterations = 5, time = 100, timeUnit = TimeUnit.MILLISECONDS)
+    @Measurement(iterations = 1, time = 100, timeUnit = TimeUnit.MILLISECONDS)
+    @Warmup(iterations = 2, time = 100, timeUnit = TimeUnit.MILLISECONDS)
     @Group("baseline")
     @Benchmark
     public void baseline(ProducerState s, Control jmhControl) {
@@ -185,16 +185,28 @@ public class LockingWithoutLock {
             s.queue.close();
     }
 
-    @Group("producer") @Benchmark public void producer(ProducerState s) {
+    @Group("producer") @Benchmark public void put(ProducerState s) {
         try {
-            s.queue.offer(s.counter++);
+            s.queue.put(s.counter++);
         } catch (Queue.ClosedException ignored) {}
     }
 
-    @Group("consumer") @Benchmark public int consumer(ConsumerState s) {
+    @Group("consumer") @Benchmark public int take(ConsumerState s) {
         try {
             return s.queue.take();
         } catch (Queue.ClosedException ignored) { return 0; }
+    }
+
+    @Group("poller") @Benchmark public int poll(ConsumerState s) {
+        try {
+            return s.queue.poll(0);
+        } catch (Queue.ClosedException ignored) { return 0; }
+    }
+
+    @Group("poller") @Benchmark public boolean offer(ProducerState s) {
+        try {
+            return s.queue.offer(s.counter++);
+        } catch (Queue.ClosedException ignored) { return false; }
     }
 
 }

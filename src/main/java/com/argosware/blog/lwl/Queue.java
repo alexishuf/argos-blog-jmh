@@ -5,7 +5,11 @@ public interface Queue {
         public static final ClosedException INSTANCE = new ClosedException();
     }
 
-    void offer(int value) throws ClosedException;
+    boolean offer(int value) throws ClosedException;
+
+    int poll(int fallback) throws ClosedException;
+
+    void put(int value) throws ClosedException;
 
     int take() throws ClosedException;
 

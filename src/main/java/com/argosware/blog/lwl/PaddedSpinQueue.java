@@ -16,7 +16,22 @@ public class PaddedSpinQueue extends PaddedSpinQueueL3 implements Queue {
         } finally { LOCK.setRelease(this, 0); }
     }
 
-    @Override public void offer(int value) throws ClosedException {
+    @Override public boolean offer(int value) throws ClosedException {
+        while ((int) LOCK.compareAndExchangeAcquire(this, 0, 1) != 0)
+            Thread.onSpinWait();
+        try {
+            if (size < capacity) {
+                data[DATA_OFF+(readIdx+size)%capacity] = value;
+                ++size;
+                return true;
+            } else if (closed) {
+                throw ClosedException.INSTANCE;
+            }
+            return false;
+        } finally { LOCK.setRelease(this, 0); }
+    }
+
+    @Override public void put(int value) throws ClosedException {
         while (true) {
             while ((int) LOCK.compareAndExchangeAcquire(this, 0, 1) != 0)
                 Thread.onSpinWait();
@@ -32,6 +47,23 @@ public class PaddedSpinQueue extends PaddedSpinQueueL3 implements Queue {
                 LOCK.setRelease(this, 0);
             }
         }
+    }
+
+    @Override public int poll(int fallback) throws ClosedException {
+        while ((int) LOCK.compareAndExchangeAcquire(this, 0, 1) != 0)
+            Thread.onSpinWait();
+        try {
+            if (size > 0) {
+                int readIdx = this.readIdx, item = data[DATA_OFF+readIdx];
+                this.readIdx = (readIdx+1)%capacity;
+                --size;
+                return item;
+            } else if (closed) {
+                throw ClosedException.INSTANCE;
+            } else {
+                return fallback;
+            }
+        } finally { LOCK.setRelease(this, 0); }
     }
 
     @Override public int take() throws ClosedException {

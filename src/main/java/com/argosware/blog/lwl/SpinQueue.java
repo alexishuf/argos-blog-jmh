@@ -31,7 +31,23 @@ class SpinQueue implements Queue {
         } finally { LOCK.setRelease(this, 0); }
     }
 
-    @Override public void offer(int value) throws ClosedException {
+    @Override public boolean offer(int value) throws ClosedException {
+        while ((int) LOCK.compareAndExchangeAcquire(this, 0, 1) != 0)
+            Thread.onSpinWait();
+        try {
+            if (size < data.length) {
+                data[(readIdx+size)%data.length] = value;
+                ++size;
+                return true;
+            } else if (closed) {
+                throw ClosedException.INSTANCE;
+            } else {
+                return false;
+            }
+        } finally { LOCK.setRelease(this, 0); }
+    }
+
+    @Override public void put(int value) throws ClosedException {
         while (true) {
             while ((int) LOCK.compareAndExchangeAcquire(this, 0, 1) != 0)
                 Thread.onSpinWait();
@@ -47,6 +63,23 @@ class SpinQueue implements Queue {
                 LOCK.setRelease(this, 0);
             }
         }
+    }
+
+    @Override public int poll(int fallback) throws ClosedException {
+        while ((int) LOCK.compareAndExchangeAcquire(this, 0, 1) != 0)
+            Thread.onSpinWait();
+        try {
+            if (size > 0) {
+                int readIdx = this.readIdx, item = data[readIdx];
+                this.readIdx = (readIdx+1)%data.length;
+                --size;
+                return item;
+            } else if (closed) {
+                throw ClosedException.INSTANCE;
+            } else {
+                return fallback;
+            }
+        } finally { LOCK.setRelease(this, 0); }
     }
 
     @Override public int take() throws ClosedException {
