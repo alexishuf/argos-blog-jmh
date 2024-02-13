@@ -32,19 +32,20 @@
 package com.argosware.blog.lwl;
 
 import org.checkerframework.checker.nullness.qual.MonotonicNonNull;
+import org.checkerframework.checker.nullness.qual.NonNull;
 import org.openjdk.jmh.annotations.*;
 import org.openjdk.jmh.infra.BenchmarkParams;
+import org.openjdk.jmh.infra.Blackhole;
 import org.openjdk.jmh.infra.Control;
 
 import java.util.ArrayList;
 import java.util.List;
-import java.util.concurrent.TimeUnit;
+import java.util.concurrent.*;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.locks.ReentrantLock;
-import java.util.function.Supplier;
 
 @State(Scope.Benchmark)
-@Threads(Threads.MAX)
+@Threads(1)
 @Fork(value = 3)
 @Measurement(iterations = 10, time = 100, timeUnit = TimeUnit.MILLISECONDS)
 @Warmup(iterations = 10, time = 200, timeUnit = TimeUnit.MILLISECONDS)
@@ -68,58 +69,67 @@ public class LockingWithoutLock {
         }
     }
 
-    public enum Capacity {
-        UNIT,
-        THREADS,
-        HALF_THREADS;
-        public int capacityForThreads(int threads) {
-            int producers = threads/2;
-            return switch (this) {
-                case UNIT         -> 1;
-                case THREADS      -> Math.max(1, producers);
-                case HALF_THREADS -> Math.max(1, producers/2);
-            };
-        }
-    }
-
     @Param public Implementation implementation;
-    @Param public Capacity capacity;
-    private final AtomicInteger nextProducerId = new AtomicInteger();
-    private final AtomicInteger nextConsumerId = new AtomicInteger();
+    @Param({"1", "4", "16", "256"}) public int capacity;
+    private final AtomicInteger nextPairId = new AtomicInteger();
     private final ReentrantLock lock = new ReentrantLock();
-    private @MonotonicNonNull Supplier<Queue> queueFactory;
     private final List<Queue> queues = new ArrayList<>();
+    private final ExecutorService counterpartExecutor
+            = Executors.newCachedThreadPool(new ThreadFactory() {
+        private final AtomicInteger nextThreadId = new AtomicInteger();
+        private final ThreadGroup group
+                = new ThreadGroup(Thread.currentThread().getThreadGroup(), "counterparts");
+        @Override public Thread newThread(@NonNull Runnable r) {
+            var name = "counterpart-" + nextThreadId.getAndIncrement();
+            var thread = new Thread(group, r, name);
+            if (thread.getPriority() != Thread.NORM_PRIORITY)
+                thread.setPriority(Thread.NORM_PRIORITY);
+            return thread;
+        }
+    });
     private long lastIterationStart = System.nanoTime();
 
     private Queue queue(int id) {
         lock.lock();
         try {
             while (queues.size() <= id)
-                queues.add(queueFactory.get());
+                queues.add(implementation.create(capacity));
             return queues.get(id);
         } finally { lock.unlock(); }
+    }
+
+    @Setup(Level.Trial)
+    public void trialSetup() {
+        lock.lock();
+        try {
+            queues.clear(); // sanity: should be empty already
+            nextPairId.setRelease(0);
+        } finally { lock.unlock(); }
+        try {
+            Thread.sleep(1_000); //CPU cooldown
+        } catch (InterruptedException ignored) {}
     }
 
     @Setup(Level.Iteration)
     public void setup(BenchmarkParams params) {
         // CPU cooldown, avoid later benchmarks being penalized by thermal throttling
-        long now = System.nanoTime();
+        long now    = System.nanoTime();
         int threads = params.getThreads();
         try {
-            double ms = (now - lastIterationStart) / 1_000_000.0;
+            double ms = (now-lastIterationStart) / 1_000_000.0;
             if (threads > 1)
-                ms *= 1.5; // if multithreading, CPU gets hotter
-            Thread.sleep((int)Math.min(1_000, ms));
+                ms *= 2; // if multithreading, sleep 66%, else 50%
+            Thread.sleep((int)Math.min(2_000, ms));
         } catch (InterruptedException ignored) { }
-        queueFactory = () -> implementation.create(capacity.capacityForThreads(threads));
         lastIterationStart = System.nanoTime();
     }
 
-    @Setup(Level.Trial)
-    public void trialSetup() {
-        try {
-            Thread.sleep(1_000); //CPU cooldown
-        } catch (InterruptedException ignored) {}
+    @TearDown(Level.Iteration) public void tearDown() {
+        lock.lock();
+        try { // sanity
+            queues.forEach(Queue::close);
+            queues.clear();
+        } finally { lock.unlock(); }
     }
 
     @Override public String toString() {
@@ -127,44 +137,71 @@ public class LockingWithoutLock {
     }
 
     @State(Scope.Thread)
-    public static class ProducerState {
+    public static class PairState implements Runnable {
+        protected Blackhole bh;
+        private @MonotonicNonNull Future<?> counterpartFuture;
         public Queue queue;
-        public int counter;
 
-        @Setup(Level.Iteration) public void setup(LockingWithoutLock outer) {
-            queue = outer.queue(outer.nextProducerId.getAndIncrement());
+        @Setup(Level.Iteration) public void setup(LockingWithoutLock outer, Blackhole bh) {
+            this.queue = outer.queue(outer.nextPairId.getAndIncrement());
+            this.bh = bh;
+            this.counterpartFuture = outer.counterpartExecutor.submit(this);
+        }
+
+        @TearDown(Level.Iteration) public void tearDown() {
+            queue.close();
+            try {
+                counterpartFuture.get();
+            } catch (InterruptedException | ExecutionException e) {
+                throw new RuntimeException("Unexpected", e);
+            }
+        }
+
+        @Override public void run() {
+            for (int i = 0; true; i++) {
+                try {
+                    counterpart(i);
+                } catch (Queue.ClosedException e) {
+                    break;
+                }
+            }
+        }
+
+        protected void counterpart(int i) throws Queue.ClosedException {}
+    }
+
+    @State(Scope.Thread)
+    public static class ConsumerState extends PairState implements Runnable {
+        @Override public void counterpart(int i) throws Queue.ClosedException {
+            queue.offer(i);
         }
     }
 
     @State(Scope.Thread)
-    public static class ConsumerState {
-        public Queue queue;
-
-        @Setup(Level.Iteration) public void setup(LockingWithoutLock outer) {
-            queue = outer.queue(outer.nextConsumerId.getAndIncrement());
+    public static class ProducerState extends PairState implements Runnable {
+        public int counter;
+        @Override public void counterpart(int i) throws Queue.ClosedException {
+            bh.consume(queue.take());
         }
     }
 
     @Fork(value = 1)
     @Measurement(iterations = 5, time = 100, timeUnit = TimeUnit.MILLISECONDS)
     @Warmup(iterations = 5, time = 100, timeUnit = TimeUnit.MILLISECONDS)
+    @Group("baseline")
     @Benchmark
     public void baseline(ProducerState s, Control jmhControl) {
         if (jmhControl.stopMeasurement)
             s.queue.close();
     }
 
-    @Group("spsc") @Benchmark public void producer(ProducerState s, Control jmhControl) {
-        if (jmhControl.stopMeasurement)
-            return; //there may be no more consumer to unblock this thread if queue is full
+    @Group("producer") @Benchmark public void producer(ProducerState s) {
         try {
             s.queue.offer(s.counter++);
         } catch (Queue.ClosedException ignored) {}
     }
 
-    @Group("spsc") @Benchmark public int consumer(ConsumerState s, Control jmhControl) {
-        if (jmhControl.stopMeasurement)
-            s.queue.close();  // there may be no producer to feed this consumer if queue is empty
+    @Group("consumer") @Benchmark public int consumer(ConsumerState s) {
         try {
             return s.queue.take();
         } catch (Queue.ClosedException ignored) { return 0; }
