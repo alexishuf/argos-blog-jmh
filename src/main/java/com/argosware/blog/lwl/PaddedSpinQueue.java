@@ -3,7 +3,7 @@ package com.argosware.blog.lwl;
 import java.lang.invoke.MethodHandles;
 import java.lang.invoke.VarHandle;
 
-public class PaddedSpinQueue extends PaddedQueueL3 implements Queue {
+public class PaddedSpinQueue extends PaddedSpinQueueL3 implements Queue {
     public PaddedSpinQueue(int capacity) {
         super(capacity);
     }
@@ -54,18 +54,18 @@ public class PaddedSpinQueue extends PaddedQueueL3 implements Queue {
     }
 }
 
-@SuppressWarnings("unused") abstract class PaddedQueueL0 {
+@SuppressWarnings("unused") abstract class PaddedSpinQueueL0 {
     private   static final int DATA_PADDING = 128/4;
     protected static final int DATA_OFF = DATA_PADDING-(16/4); // use array object header
     protected final int[] data;
     protected final int capacity;
 
-    public PaddedQueueL0(int capacity) {
+    public PaddedSpinQueueL0(int capacity) {
         this.capacity = capacity;
-        this.data = new int[capacity];
+        this.data = new int[DATA_OFF+capacity+DATA_PADDING];
     }
 }
-@SuppressWarnings("unused") abstract class PaddedQueueL1 extends PaddedQueueL0 {
+@SuppressWarnings("unused") abstract class PaddedSpinQueueL1 extends PaddedSpinQueueL0 {
     private boolean p001, p002, p003, p004, p005, p006, p007, p008;
     private boolean p011, p012, p013, p014, p015, p016, p017, p018;
     private boolean p021, p022, p023, p024, p025, p026, p027, p028;
@@ -83,14 +83,14 @@ public class PaddedSpinQueue extends PaddedQueueL3 implements Queue {
     private boolean p161, p162, p163, p164, p165, p166, p167, p168;
     private boolean p171, p172, p173, p174, p175, p176, p177, p178;
 
-    public PaddedQueueL1(int capacity) {super(capacity);}
+    public PaddedSpinQueueL1(int capacity) {super(capacity);}
 }
-abstract class PaddedQueueL2 extends PaddedQueueL1 {
+abstract class PaddedSpinQueueL2 extends PaddedSpinQueueL1 {
     protected static final int DATA_OFF = (128-16)/4;
     protected static final VarHandle LOCK;
     static {
         try {
-            LOCK = MethodHandles.lookup().findVarHandle(PaddedQueueL2.class, "plainLock", int.class);
+            LOCK = MethodHandles.lookup().findVarHandle(PaddedSpinQueueL2.class, "plainLock", int.class);
         } catch (NoSuchFieldException | IllegalAccessException e) {
             throw new ExceptionInInitializerError(e);
         }
@@ -99,9 +99,9 @@ abstract class PaddedQueueL2 extends PaddedQueueL1 {
     protected int plainLock;
     protected int readIdx, size;
     protected boolean closed;
-    PaddedQueueL2(int capacity) {super(capacity);}
+    PaddedSpinQueueL2(int capacity) {super(capacity);}
 }
-@SuppressWarnings("unused") abstract class PaddedQueueL3 extends PaddedQueueL2 {
+@SuppressWarnings("unused") abstract class PaddedSpinQueueL3 extends PaddedSpinQueueL2 {
     private boolean p001, p002, p003, p004, p005, p006, p007, p008;
     private boolean p011, p012, p013, p014, p015, p016, p017, p018;
     private boolean p021, p022, p023, p024, p025, p026, p027, p028;
@@ -119,5 +119,5 @@ abstract class PaddedQueueL2 extends PaddedQueueL1 {
     private boolean p161, p162, p163, p164, p165, p166, p167, p168;
     private boolean p171, p172, p173, p174, p175, p176, p177, p178;
 
-    PaddedQueueL3(int capacity) {super(capacity);}
+    PaddedSpinQueueL3(int capacity) {super(capacity);}
 }
