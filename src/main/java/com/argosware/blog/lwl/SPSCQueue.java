@@ -23,19 +23,39 @@ class SPSCQueue implements Queue {
     private final int[] data;
     private Thread consumer, producer;
     private int readIdx, size;
+    private boolean closed;
 
     public SPSCQueue(int capacity) {
         this.data = new int[capacity];
     }
 
-    @Override public void offer(int value, @Nullable Thread currentThread) {
+    @Override public void close() {
+        Thread consumer = null, producer = null;
+        while ((int)LOCK.compareAndExchangeAcquire(this, 0, 1) != 0)
+            Thread.onSpinWait();
+        try {
+            closed = true;
+            consumer = this.consumer;
+            producer = this.producer;
+            this.consumer = null;
+            this.producer = null;
+        } finally {
+            LOCK.setRelease(this, 0);
+            LockSupport.unpark(consumer);
+            LockSupport.unpark(producer);
+        }
+    }
+
+    @Override public void offer(int value, @Nullable Thread currentThread) throws ClosedException {
         while (true) {
             Thread unpark = null;
             while ((int) LOCK.compareAndExchangeAcquire(this, 0, 1) != 0)
                 Thread.onSpinWait();
             boolean locked = true;
             try {
-                if (this.size >= data.length) {
+                if (closed) {
+                    throw ClosedException.INSTANCE;
+                } else if (this.size >= data.length) {
                     if (producer == null) {
                         if (currentThread == null)
                             currentThread = currentThread();
@@ -59,14 +79,16 @@ class SPSCQueue implements Queue {
         }
     }
 
-    @Override public int take(@Nullable Thread currentThread) {
+    @Override public int take(@Nullable Thread currentThread) throws ClosedException {
         while (true) {
             Thread unpark = null;
             while ((int) LOCK.compareAndExchangeAcquire(this, 0, 1) != 0)
                 Thread.onSpinWait();
             boolean locked = true;
             try {
-                if (size == 0) {
+                if (closed) {
+                    throw ClosedException.INSTANCE;
+                } else if (size == 0) {
                     if (consumer == null) {
                         if (currentThread == null)
                             currentThread = currentThread();

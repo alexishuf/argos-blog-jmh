@@ -3,7 +3,13 @@ package com.argosware.blog.lwl;
 import org.checkerframework.checker.nullness.qual.Nullable;
 
 public interface Queue {
-    void offer(int value, @Nullable Thread currentThread);
+    final class ClosedException extends Exception {
+        public static final ClosedException INSTANCE = new ClosedException();
+    }
 
-    int take(@Nullable Thread currentThread);
+    void offer(int value, @Nullable Thread currentThread) throws ClosedException;
+
+    int take(@Nullable Thread currentThread) throws ClosedException;
+
+    void close();
 }

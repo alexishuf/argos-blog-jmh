@@ -11,14 +11,33 @@ import static java.lang.Thread.currentThread;
 public class PaddedSPSCQueue extends PaddedSPSCQueueL3 implements Queue {
     public PaddedSPSCQueue(int capacity) { super(capacity); }
 
-    @Override public void offer(int value, @Nullable Thread currentThread) {
+    @Override public void close() {
+        Thread consumer = null, producer = null;
+        while ((int)LOCK.compareAndExchangeAcquire(this, 0, 1) != 0)
+            Thread.onSpinWait();
+        try {
+            closed = true;
+            consumer = this.consumer;
+            producer = this.producer;
+            this.consumer = null;
+            this.producer = null;
+        } finally {
+            LOCK.setRelease(this, 0);
+            LockSupport.unpark(consumer);
+            LockSupport.unpark(producer);
+        }
+    }
+
+    @Override public void offer(int value, @Nullable Thread currentThread) throws ClosedException {
         while (true) {
             Thread unpark = null;
             while ((int)LOCK.compareAndExchangeAcquire(this, 0, 1) != 0)
                 Thread.onSpinWait();
             boolean locked = true;
             try {
-                if (this.size >= capacity) {
+                if (closed) {
+                    throw ClosedException.INSTANCE;
+                } else if (this.size >= capacity) {
                     if (producer == null) {
                         if (currentThread == null)
                             currentThread = currentThread();
@@ -42,14 +61,16 @@ public class PaddedSPSCQueue extends PaddedSPSCQueueL3 implements Queue {
         }
     }
 
-    @Override public int take(@Nullable Thread currentThread) {
+    @Override public int take(@Nullable Thread currentThread) throws ClosedException {
         while (true) {
             Thread unpark = null;
             while ((int) LOCK.compareAndExchangeAcquire(this, 0, 1) != 0)
                 Thread.onSpinWait();
             boolean locked = true;
             try {
-                if (size == 0) {
+                if (closed) {
+                    throw ClosedException.INSTANCE;
+                } else if (size == 0) {
                     if (consumer == null) {
                         if (currentThread == null)
                             currentThread = currentThread();
@@ -117,6 +138,7 @@ abstract class PaddedSPSCQueueL2 extends PaddedSPSCQueueL1 {
     @SuppressWarnings("unused") protected int plainLock;
     protected Thread consumer, producer;
     protected int readIdx, size;
+    protected boolean closed;
 
     public PaddedSPSCQueueL2(int capacity) {super(capacity);}
 }

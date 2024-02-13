@@ -128,6 +128,10 @@ public class LockingWithoutLock {
         } catch (InterruptedException ignored) {}
     }
 
+    @Override public String toString() {
+        return getClass().getSimpleName();
+    }
+
     @State(Scope.Thread)
     public static class ProducerConsumerState {
         protected boolean cacheCurrentThread;
@@ -162,16 +166,29 @@ public class LockingWithoutLock {
         }
     }
 
-    @Group("balanced") @Benchmark public void produce(ProducerState s, Control jmhControl) {
+    @Fork(value = 1)
+    @Measurement(iterations = 5, time = 100, timeUnit = TimeUnit.MILLISECONDS)
+    @Warmup(iterations = 5, time = 100, timeUnit = TimeUnit.MILLISECONDS)
+    @Benchmark
+    public void baseline(ProducerState s, Control jmhControl) {
         if (jmhControl.stopMeasurement)
-            return; //there may be no more consumer to unblock this thread if queue is full
-        s.queue.offer(s.counter++, s.cachedCurrentThread());
+            s.queue.close();
     }
 
-    @Group("balanced") @Benchmark public int consume(ConsumerState s, Control jmhControl) {
+    @Group("spsc") @Benchmark public void producer(ProducerState s, Control jmhControl) {
         if (jmhControl.stopMeasurement)
-            return 0;  // there may be no producer to feed this consumer if queue is empty
-        return s.queue.take(s.cachedCurrentThread());
+            return; //there may be no more consumer to unblock this thread if queue is full
+        try {
+            s.queue.offer(s.counter++, s.cachedCurrentThread());
+        } catch (Queue.ClosedException ignored) {}
+    }
+
+    @Group("spsc") @Benchmark public int consumer(ConsumerState s, Control jmhControl) {
+        if (jmhControl.stopMeasurement)
+            s.queue.close();  // there may be no producer to feed this consumer if queue is empty
+        try {
+            return s.queue.take(s.cachedCurrentThread());
+        } catch (Queue.ClosedException ignored) { return 0; }
     }
 
 }

@@ -10,7 +10,15 @@ public class PaddedSpinQueue extends PaddedQueueL3 implements Queue {
         super(capacity);
     }
 
-    @Override public void offer(int value, @Nullable Thread currentThread) {
+    @Override public void close() {
+        while ((int)LOCK.compareAndExchangeAcquire(this, 0, 1) != 0)
+            Thread.onSpinWait();
+        try {
+            closed = true;
+        } finally { LOCK.setRelease(this, 0); }
+    }
+
+    @Override public void offer(int value, @Nullable Thread currentThread) throws ClosedException {
         while (true) {
             while ((int) LOCK.compareAndExchangeAcquire(this, 0, 1) != 0)
                 Thread.onSpinWait();
@@ -19,6 +27,8 @@ public class PaddedSpinQueue extends PaddedQueueL3 implements Queue {
                     data[DATA_OFF+(readIdx+size)%capacity] = value;
                     ++size;
                     break;
+                } else if (closed) {
+                    throw ClosedException.INSTANCE;
                 }
             } finally {
                 LOCK.setRelease(this, 0);
@@ -26,7 +36,7 @@ public class PaddedSpinQueue extends PaddedQueueL3 implements Queue {
         }
     }
 
-    @Override public int take(@Nullable Thread currentThread) {
+    @Override public int take(@Nullable Thread currentThread) throws ClosedException {
         while (true) {
             while ((int) LOCK.compareAndExchangeAcquire(this, 0, 1) != 0)
                 Thread.onSpinWait();
@@ -36,6 +46,8 @@ public class PaddedSpinQueue extends PaddedQueueL3 implements Queue {
                     this.readIdx = (readIdx+1)%capacity;
                     --size;
                     return item;
+                } else if (closed) {
+                    throw ClosedException.INSTANCE;
                 }
             } finally {
                 LOCK.setRelease(this, 0);
@@ -88,6 +100,7 @@ abstract class PaddedQueueL2 extends PaddedQueueL1 {
 
     protected int plainLock;
     protected int readIdx, size;
+    protected boolean closed;
     PaddedQueueL2(int capacity) {super(capacity);}
 }
 @SuppressWarnings("unused") abstract class PaddedQueueL3 extends PaddedQueueL2 {
