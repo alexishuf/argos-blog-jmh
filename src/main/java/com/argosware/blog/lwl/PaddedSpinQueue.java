@@ -1,7 +1,5 @@
 package com.argosware.blog.lwl;
 
-import org.checkerframework.checker.nullness.qual.Nullable;
-
 import java.lang.invoke.MethodHandles;
 import java.lang.invoke.VarHandle;
 
@@ -18,7 +16,7 @@ public class PaddedSpinQueue extends PaddedQueueL3 implements Queue {
         } finally { LOCK.setRelease(this, 0); }
     }
 
-    @Override public void offer(int value, @Nullable Thread currentThread) throws ClosedException {
+    @Override public void offer(int value) throws ClosedException {
         while (true) {
             while ((int) LOCK.compareAndExchangeAcquire(this, 0, 1) != 0)
                 Thread.onSpinWait();
@@ -36,7 +34,7 @@ public class PaddedSpinQueue extends PaddedQueueL3 implements Queue {
         }
     }
 
-    @Override public int take(@Nullable Thread currentThread) throws ClosedException {
+    @Override public int take() throws ClosedException {
         while (true) {
             while ((int) LOCK.compareAndExchangeAcquire(this, 0, 1) != 0)
                 Thread.onSpinWait();

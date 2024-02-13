@@ -1,7 +1,5 @@
 package com.argosware.blog.lwl;
 
-import org.checkerframework.checker.nullness.qual.Nullable;
-
 import java.lang.invoke.MethodHandles;
 import java.lang.invoke.VarHandle;
 import java.util.concurrent.locks.LockSupport;
@@ -28,7 +26,7 @@ public class PaddedSPSCQueue extends PaddedSPSCQueueL3 implements Queue {
         }
     }
 
-    @Override public void offer(int value, @Nullable Thread currentThread) throws ClosedException {
+    @Override public void offer(int value) throws ClosedException {
         while (true) {
             Thread unpark = null;
             while ((int)LOCK.compareAndExchangeAcquire(this, 0, 1) != 0)
@@ -39,9 +37,7 @@ public class PaddedSPSCQueue extends PaddedSPSCQueueL3 implements Queue {
                     throw ClosedException.INSTANCE;
                 } else if (this.size >= capacity) {
                     if (producer == null) {
-                        if (currentThread == null)
-                            currentThread = currentThread();
-                        producer = currentThread;
+                        producer = currentThread();
                         LOCK.setRelease(this, 0);
                         locked = false;
                         LockSupport.park();
@@ -61,7 +57,7 @@ public class PaddedSPSCQueue extends PaddedSPSCQueueL3 implements Queue {
         }
     }
 
-    @Override public int take(@Nullable Thread currentThread) throws ClosedException {
+    @Override public int take() throws ClosedException {
         while (true) {
             Thread unpark = null;
             while ((int) LOCK.compareAndExchangeAcquire(this, 0, 1) != 0)
@@ -72,9 +68,7 @@ public class PaddedSPSCQueue extends PaddedSPSCQueueL3 implements Queue {
                     throw ClosedException.INSTANCE;
                 } else if (size == 0) {
                     if (consumer == null) {
-                        if (currentThread == null)
-                            currentThread = currentThread();
-                        consumer = currentThread;
+                        consumer = currentThread();
                         LOCK.setRelease(this, 0);
                         locked = false;
                         LockSupport.park();

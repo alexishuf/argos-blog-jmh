@@ -32,7 +32,6 @@
 package com.argosware.blog.lwl;
 
 import org.checkerframework.checker.nullness.qual.MonotonicNonNull;
-import org.checkerframework.checker.nullness.qual.Nullable;
 import org.openjdk.jmh.annotations.*;
 import org.openjdk.jmh.infra.BenchmarkParams;
 import org.openjdk.jmh.infra.Control;
@@ -43,8 +42,6 @@ import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.locks.ReentrantLock;
 import java.util.function.Supplier;
-
-import static java.lang.Thread.currentThread;
 
 @State(Scope.Benchmark)
 @Threads(Threads.MAX)
@@ -58,16 +55,15 @@ public class LockingWithoutLock {
         LOCK,
         SPIN,
         SPSC,
-        SPSC_UNCACHED_THREAD,
         PADDED_SPIN,
         PADDED_SPSC;
         public Queue create(int capacity) {
             return switch (this) {
-                case LOCK                       -> new LockQueue(capacity);
-                case SPIN                       -> new SpinQueue(capacity);
-                case SPSC, SPSC_UNCACHED_THREAD -> new SPSCQueue(capacity);
-                case PADDED_SPIN                -> new PaddedSpinQueue(capacity);
-                case PADDED_SPSC                -> new PaddedSPSCQueue(capacity);
+                case LOCK        -> new LockQueue(capacity);
+                case SPIN        -> new SpinQueue(capacity);
+                case SPSC        -> new SPSCQueue(capacity);
+                case PADDED_SPIN -> new PaddedSpinQueue(capacity);
+                case PADDED_SPSC -> new PaddedSPSCQueue(capacity);
             };
         }
     }
@@ -88,7 +84,6 @@ public class LockingWithoutLock {
 
     @Param public Implementation implementation;
     @Param public Capacity capacity;
-    private boolean cacheThread;
     private final AtomicInteger nextProducerId = new AtomicInteger();
     private final AtomicInteger nextConsumerId = new AtomicInteger();
     private final ReentrantLock lock = new ReentrantLock();
@@ -116,7 +111,6 @@ public class LockingWithoutLock {
                 ms *= 1.5; // if multithreading, CPU gets hotter
             Thread.sleep((int)Math.min(1_000, ms));
         } catch (InterruptedException ignored) { }
-        cacheThread = implementation != Implementation.SPSC_UNCACHED_THREAD;
         queueFactory = () -> implementation.create(capacity.capacityForThreads(threads));
         lastIterationStart = System.nanoTime();
     }
@@ -133,22 +127,7 @@ public class LockingWithoutLock {
     }
 
     @State(Scope.Thread)
-    public static class ProducerConsumerState {
-        protected boolean cacheCurrentThread;
-        protected @MonotonicNonNull Thread thread;
-
-        public @Nullable Thread cachedCurrentThread() {
-            if (cacheCurrentThread) thread = currentThread();
-            return thread;
-        }
-
-        @Setup(Level.Trial) public void trialSetup(LockingWithoutLock outer) {
-            cacheCurrentThread = outer.cacheThread;
-        }
-    }
-
-    @State(Scope.Thread)
-    public static class ProducerState extends ProducerConsumerState {
+    public static class ProducerState {
         public Queue queue;
         public int counter;
 
@@ -158,7 +137,7 @@ public class LockingWithoutLock {
     }
 
     @State(Scope.Thread)
-    public static class ConsumerState extends ProducerConsumerState {
+    public static class ConsumerState {
         public Queue queue;
 
         @Setup(Level.Iteration) public void setup(LockingWithoutLock outer) {
@@ -179,7 +158,7 @@ public class LockingWithoutLock {
         if (jmhControl.stopMeasurement)
             return; //there may be no more consumer to unblock this thread if queue is full
         try {
-            s.queue.offer(s.counter++, s.cachedCurrentThread());
+            s.queue.offer(s.counter++);
         } catch (Queue.ClosedException ignored) {}
     }
 
@@ -187,7 +166,7 @@ public class LockingWithoutLock {
         if (jmhControl.stopMeasurement)
             s.queue.close();  // there may be no producer to feed this consumer if queue is empty
         try {
-            return s.queue.take(s.cachedCurrentThread());
+            return s.queue.take();
         } catch (Queue.ClosedException ignored) { return 0; }
     }
 

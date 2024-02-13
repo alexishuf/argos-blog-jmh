@@ -1,7 +1,5 @@
 package com.argosware.blog.lwl;
 
-import org.checkerframework.checker.nullness.qual.Nullable;
-
 import java.util.concurrent.locks.Condition;
 import java.util.concurrent.locks.ReentrantLock;
 
@@ -26,7 +24,7 @@ class LockQueue implements Queue {
         } finally { lock.unlock(); }
     }
 
-    @Override public void offer(int value, @Nullable Thread currentThread) throws ClosedException {
+    @Override public void offer(int value) throws ClosedException {
         lock.lock();
         try {
             while (size == data.length && !closed)
@@ -41,7 +39,7 @@ class LockQueue implements Queue {
         }
     }
 
-    @Override public int take(@Nullable Thread currentThread) throws ClosedException {
+    @Override public int take() throws ClosedException {
         lock.lock();
         try {
             while (size == 0 && !closed)
