@@ -42,7 +42,6 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.concurrent.*;
 import java.util.concurrent.atomic.AtomicInteger;
-import java.util.concurrent.locks.ReentrantLock;
 
 @State(Scope.Benchmark)
 @Threads(1)
@@ -72,7 +71,6 @@ public class LockingWithoutLock {
     @Param public Implementation implementation;
     @Param({"1", "4", "16", "256"}) public int capacity;
     private final AtomicInteger nextPairId = new AtomicInteger();
-    private final ReentrantLock lock = new ReentrantLock();
     private final List<Queue> queues = new ArrayList<>();
     private final ExecutorService counterpartExecutor
             = Executors.newCachedThreadPool(new ThreadFactory() {
@@ -89,22 +87,10 @@ public class LockingWithoutLock {
     });
     private long lastIterationStart = System.nanoTime();
 
-    private Queue queue(int id) {
-        lock.lock();
-        try {
-            while (queues.size() <= id)
-                queues.add(implementation.create(capacity));
-            return queues.get(id);
-        } finally { lock.unlock(); }
-    }
-
     @Setup(Level.Trial)
     public void trialSetup() {
-        lock.lock();
-        try {
-            queues.clear(); // sanity: should be empty already
-            nextPairId.setRelease(0);
-        } finally { lock.unlock(); }
+        queues.clear(); // sanity: should be empty already
+        nextPairId.setRelease(0);
         try {
             Thread.sleep(1_000); //CPU cooldown
         } catch (InterruptedException ignored) {}
@@ -112,9 +98,16 @@ public class LockingWithoutLock {
 
     @Setup(Level.Iteration)
     public void setup(BenchmarkParams params) {
+        int threads = params.getThreads();
+        // close leftover queues
+        queues.forEach(Queue::close);
+        queues.clear();
+        nextPairId.setRelease(0); // restart numbering for PairState instances
+        // create queues all from the same thread
+        for (int i = 0, max = threads+4; i < max; i++)
+            queues.add(implementation.create(capacity));
         // CPU cooldown, avoid later benchmarks being penalized by thermal throttling
         long now    = System.nanoTime();
-        int threads = params.getThreads();
         try {
             double ms = (now-lastIterationStart) / 1_000_000.0;
             if (threads > 1)
@@ -125,11 +118,8 @@ public class LockingWithoutLock {
     }
 
     @TearDown(Level.Iteration) public void tearDown() {
-        lock.lock();
-        try { // sanity
-            queues.forEach(Queue::close);
-            queues.clear();
-        } finally { lock.unlock(); }
+        queues.forEach(Queue::close);
+        queues.clear();
     }
 
     @Override public String toString() {
@@ -143,7 +133,7 @@ public class LockingWithoutLock {
         public Queue queue;
 
         @Setup(Level.Iteration) public void setup(LockingWithoutLock outer, Blackhole bh) {
-            this.queue = outer.queue(outer.nextPairId.getAndIncrement());
+            this.queue = outer.queues.get(outer.nextPairId.getAndIncrement());
             this.bh = bh;
             this.counterpartFuture = outer.counterpartExecutor.submit(this);
         }
@@ -171,14 +161,14 @@ public class LockingWithoutLock {
     }
 
     @State(Scope.Thread)
-    public static class ConsumerState extends PairState implements Runnable {
+    public static class ConsumerState extends PairState {
         @Override public void counterpart(int i) throws Queue.ClosedException {
             queue.offer(i);
         }
     }
 
     @State(Scope.Thread)
-    public static class ProducerState extends PairState implements Runnable {
+    public static class ProducerState extends PairState {
         public int counter;
         @Override public void counterpart(int i) throws Queue.ClosedException {
             bh.consume(queue.take());
