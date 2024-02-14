@@ -182,27 +182,19 @@ public class LockingWithoutLock {
     public int baseline(ProducerState s) { return s.counter++; }
 
     @Group("queue") @Benchmark public void put(ProducerState s) {
-        try {
-            s.queue.put(s.counter++);
-        } catch (Queue.ClosedException ignored) {}
+        s.queue.put(s.counter++);
     }
 
     @Group("queue") @Benchmark public int take(ConsumerState s) {
-        try {
-            return s.queue.take();
-        } catch (Queue.ClosedException ignored) { return 0; }
+        return s.queue.take();
     }
 
     @Group("queue") @Benchmark public int poll(ConsumerState s) {
-        try {
-            return s.queue.poll(0);
-        } catch (Queue.ClosedException ignored) { return 0; }
+        return s.queue.poll(0);
     }
 
     @Group("queue") @Benchmark public boolean offer(ProducerState s) {
-        try {
-            return s.queue.offer(s.counter++);
-        } catch (Queue.ClosedException ignored) { return false; }
+        return s.queue.offer(s.counter++);
     }
 
 }

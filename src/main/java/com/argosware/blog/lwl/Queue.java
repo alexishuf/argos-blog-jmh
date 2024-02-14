@@ -1,7 +1,7 @@
 package com.argosware.blog.lwl;
 
 public interface Queue {
-    final class ClosedException extends Exception {
+    final class ClosedException extends RuntimeException {
         public static final ClosedException INSTANCE = new ClosedException();
     }
 
