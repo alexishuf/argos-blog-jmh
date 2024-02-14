@@ -36,7 +36,6 @@ import org.checkerframework.checker.nullness.qual.NonNull;
 import org.openjdk.jmh.annotations.*;
 import org.openjdk.jmh.infra.BenchmarkParams;
 import org.openjdk.jmh.infra.Blackhole;
-import org.openjdk.jmh.infra.Control;
 
 import java.util.ArrayList;
 import java.util.List;
