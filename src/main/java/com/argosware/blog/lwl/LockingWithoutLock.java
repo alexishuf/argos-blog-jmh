@@ -176,14 +176,11 @@ public class LockingWithoutLock {
     }
 
     @Fork(value = 1)
-    @Measurement(iterations = 1, time = 100, timeUnit = TimeUnit.MILLISECONDS)
-    @Warmup(iterations = 2, time = 100, timeUnit = TimeUnit.MILLISECONDS)
+    @Measurement(iterations = 3, time = 100, timeUnit = TimeUnit.MILLISECONDS)
+    @Warmup(iterations = 5, time = 100, timeUnit = TimeUnit.MILLISECONDS)
     @Group("baseline")
     @Benchmark
-    public void baseline(ProducerState s, Control jmhControl) {
-        if (jmhControl.stopMeasurement)
-            s.queue.close();
-    }
+    public int baseline(ProducerState s) { return s.counter++; }
 
     @Group("queue") @Benchmark public void put(ProducerState s) {
         try {
